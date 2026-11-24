@@ -12,7 +12,10 @@ function Login({ onOk }) {
     setBusy(true);
     setErr('');
     try {
-      await api.post('/auth/login', { email, password });
+      const r = await api.post('/auth/login', { email, password });
+      if (r.data?.token) {
+        localStorage.setItem('clinic_staff_token', r.data.token);
+      }
       onOk();
     } catch (x) {
       setErr(errMsg(x));
@@ -109,7 +112,10 @@ export default function Bookings() {
   useEffect(() => {
     api.get('/auth/me')
       .then(() => setAuthed(true))
-      .catch(() => setAuthed(false));
+      .catch(() => {
+        localStorage.removeItem('clinic_staff_token');
+        setAuthed(false);
+      });
   }, []);
 
   useEffect(() => {
@@ -128,6 +134,7 @@ export default function Bookings() {
       })
       .catch((e) => {
         if (e.response?.status === 401) {
+          localStorage.removeItem('clinic_staff_token');
           setAuthed(false);
         } else {
           setErr(errMsg(e));
@@ -175,7 +182,10 @@ export default function Bookings() {
         <button
           className="btn btn-ghost"
           onClick={async () => {
-            await api.post('/auth/logout');
+            localStorage.removeItem('clinic_staff_token');
+            try {
+              await api.post('/auth/logout');
+            } catch (_) {}
             setAuthed(false);
           }}
         >

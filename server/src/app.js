@@ -44,7 +44,7 @@ function createApp() {
 
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
-  app.use(helmet());
+  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 
   // CORS configuration supporting local dev, custom origins, and Vercel deployments
   const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173')
@@ -65,7 +65,8 @@ function createApp() {
         }
         return callback(new Error(`Origin ${origin} not allowed by CORS`));
       },
-      credentials: true
+      credentials: true,
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
     })
   );
   if (!test) app.use(morgan('tiny')); // no request bodies logged -> no patient PII in logs
@@ -164,7 +165,8 @@ function createApp() {
       maxAge: 2 * 3600 * 1000
     };
     res.cookie('token', token, cookieOptions);
-    res.json({ success: true, email: admin.email });
+    // Return token in JSON response so cross-domain clients (Vercel -> Render) can use Bearer auth
+    res.json({ success: true, email: admin.email, token });
   }));
   app.post('/api/auth/logout', (req, res) => {
     res.clearCookie('token', {
@@ -176,12 +178,23 @@ function createApp() {
   });
   const requireAdmin = (req, res, next) => {
     try {
-      // CSRF: cookie is SameSite=Strict; additionally require a custom header on state-changing calls.
-      if (req.method !== 'GET' && req.get('x-requested-with') !== 'XMLHttpRequest') throw new HttpError(403, 'Forbidden');
-      const p = jwt.verify(req.cookies.token || '', process.env.JWT_SECRET);
+      const authHeader = req.get('authorization');
+      const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+      const rawToken = req.cookies.token || bearerToken;
+      if (!rawToken) throw new HttpError(401, 'Please log in');
+
+      // CSRF check: only required when relying strictly on ambient cookies without Bearer header
+      if (!bearerToken && req.method !== 'GET' && req.get('x-requested-with') !== 'XMLHttpRequest') {
+        throw new HttpError(403, 'Forbidden');
+      }
+
+      const p = jwt.verify(rawToken, process.env.JWT_SECRET);
       if (p.role !== 'admin') throw new HttpError(403, 'Forbidden');
-      req.adminId = p.id; next();
-    } catch (e) { next(e instanceof HttpError ? e : new HttpError(401, 'Please log in')); }
+      req.adminId = p.id;
+      next();
+    } catch (e) {
+      next(e instanceof HttpError ? e : new HttpError(401, 'Please log in'));
+    }
   };
   app.get('/api/auth/me', requireAdmin, (req, res) => res.json({ success: true }));
 

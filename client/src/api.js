@@ -11,6 +11,17 @@ export const api = axios.create({
   headers: { 'X-Requested-With': 'XMLHttpRequest' }
 });
 
+// Attach Authorization Bearer token if present (ensures cross-origin auth between Vercel and Render works reliably across all browsers)
+api.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('clinic_staff_token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
+
 export const errMsg = (e) => {
   if (!e.response) {
     if (e.code === 'ERR_NETWORK' || e.message?.toLowerCase().includes('network')) {
