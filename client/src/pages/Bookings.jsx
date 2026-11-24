@@ -1,131 +1,24 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, errMsg, todayIST, addDays, formatDatePretty } from '../api';
-
-function Login({ onOk }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const go = async (e) => {
-    e.preventDefault();
-    setBusy(true);
-    setErr('');
-    try {
-      const r = await api.post('/auth/login', { email, password });
-      if (r.data?.token) {
-        localStorage.setItem('clinic_staff_token', r.data.token);
-      }
-      onOk();
-    } catch (x) {
-      setErr(errMsg(x));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const fillDemo = () => {
-    setEmail('admin@clinic.local');
-    setPassword('Admin@12345');
-  };
-
-  return (
-    <div className="login-card">
-      <div className="login-card-header">
-        <div className="brand-logo-icon" style={{ margin: '0 auto 1rem', width: '48px', height: '48px' }}>
-          🔒
-        </div>
-        <h1>Staff Sign In</h1>
-        <p className="muted">Enter your administrator credentials to manage appointments.</p>
-      </div>
-
-      <form onSubmit={go} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <div className="form-field">
-          <label htmlFor="staff-email">Clinic Email</label>
-          <input
-            id="staff-email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="admin@clinic.local"
-            required
-            autoComplete="username"
-          />
-        </div>
-
-        <div className="form-field">
-          <label htmlFor="staff-password">Password</label>
-          <input
-            id="staff-password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
-            required
-            autoComplete="current-password"
-          />
-        </div>
-
-        {err && (
-          <div role="alert" className="alert-banner error" style={{ margin: 0 }}>
-            <span className="alert-icon">⚠️</span>
-            <div className="alert-content">
-              <strong>Login Failed</strong>
-              <span>{err}</span>
-            </div>
-          </div>
-        )}
-
-        <button type="submit" className="btn btn-primary" disabled={busy} style={{ width: '100%', marginTop: '0.5rem' }}>
-          {busy ? 'Authenticating…' : 'Sign In to Dashboard'}
-        </button>
-
-        <div className="demo-credentials-box">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span><strong>Default Demo Account:</strong></span>
-            <button
-              type="button"
-              className="chip-btn"
-              onClick={fillDemo}
-            >
-              Fill Credentials
-            </button>
-          </div>
-          <div style={{ marginTop: '0.4rem', fontFamily: 'monospace' }}>
-            admin@clinic.local / Admin@12345
-          </div>
-        </div>
-      </form>
-    </div>
-  );
-}
+import { api, errMsg, todayIST, addDays } from '../api';
 
 export default function Bookings() {
-  const [authed, setAuthed] = useState(null);
   const [f, setF] = useState({ date: todayIST(), doctor: '', service: '', sort: 'asc', page: 1 });
   const [rows, setRows] = useState({ data: [], pages: 1, total: 0 });
   const [doctors, setDoctors] = useState([]);
   const [services, setServices] = useState([]);
   const [err, setErr] = useState('');
+  const [loading, setLoading] = useState(true);
   const [cancelModalId, setCancelModalId] = useState(null);
 
+  // Load doctors and services once
   useEffect(() => {
-    api.get('/auth/me')
-      .then(() => setAuthed(true))
-      .catch(() => {
-        localStorage.removeItem('clinic_staff_token');
-        setAuthed(false);
-      });
+    api.get('/doctors').then((r) => setDoctors(r.data.data)).catch(() => {});
+    api.get('/services').then((r) => setServices(r.data.data)).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    if (authed) {
-      api.get('/doctors').then((r) => setDoctors(r.data.data)).catch(() => {});
-      api.get('/services').then((r) => setServices(r.data.data)).catch(() => {});
-    }
-  }, [authed]);
-
+  // Load appointments based on filters
   const load = useCallback(() => {
+    setLoading(true);
     const params = Object.fromEntries(Object.entries(f).filter(([, v]) => v !== ''));
     api.get('/admin/appointments', { params })
       .then((r) => {
@@ -133,18 +26,16 @@ export default function Bookings() {
         setErr('');
       })
       .catch((e) => {
-        if (e.response?.status === 401) {
-          localStorage.removeItem('clinic_staff_token');
-          setAuthed(false);
-        } else {
-          setErr(errMsg(e));
-        }
+        setErr(errMsg(e));
+      })
+      .finally(() => {
+        setLoading(false);
       });
   }, [f]);
 
   useEffect(() => {
-    if (authed) load();
-  }, [authed, load]);
+    load();
+  }, [load]);
 
   const set = (k, v) => setF((p) => ({ ...p, [k]: v, page: k === 'page' ? v : 1 }));
 
@@ -160,36 +51,20 @@ export default function Bookings() {
     }
   };
 
-  if (authed === null) {
-    return (
-      <div className="skeleton-loader" style={{ maxWidth: '600px', margin: '3rem auto' }}>
-        <div className="skeleton-box"></div>
-      </div>
-    );
-  }
-
-  if (!authed) {
-    return <Login onOk={() => setAuthed(true)} />;
-  }
-
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: '2rem', margin: 0 }}>Staff Appointments Dashboard</h1>
-          <p className="muted" style={{ margin: '0.2rem 0 0 0' }}>Manage patient bookings, monitor daily schedules, and manage slot availability.</p>
+          <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: '2rem', margin: 0 }}>Appointments Management Dashboard</h1>
+          <p className="muted" style={{ margin: '0.2rem 0 0 0' }}>Monitor bookings, filter by date, and manage slot availability in real time.</p>
         </div>
         <button
+          type="button"
           className="btn btn-ghost"
-          onClick={async () => {
-            localStorage.removeItem('clinic_staff_token');
-            try {
-              await api.post('/auth/logout');
-            } catch (_) {}
-            setAuthed(false);
-          }}
+          onClick={load}
+          disabled={loading}
         >
-          Sign Out
+          {loading ? 'Refreshing…' : '🔄 Refresh Data'}
         </button>
       </div>
 
@@ -298,6 +173,13 @@ export default function Bookings() {
         </div>
       )}
 
+      {/* Loading Skeleton */}
+      {loading && !rows.data.length && (
+        <div className="skeleton-loader" style={{ marginBottom: '1.5rem' }}>
+          <div className="skeleton-box"></div>
+        </div>
+      )}
+
       {/* Appointments Data Table */}
       <div className="matrix-scroll-wrapper">
         <table className="styled-table">
@@ -341,7 +223,7 @@ export default function Bookings() {
                 </td>
               </tr>
             ))}
-            {!rows.data.length && (
+            {!rows.data.length && !loading && (
               <tr>
                 <td colSpan="8" style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--muted)' }}>
                   No appointments found matching the selected filters.

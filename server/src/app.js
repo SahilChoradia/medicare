@@ -46,29 +46,16 @@ function createApp() {
   app.set('trust proxy', 1);
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 
-  // CORS configuration supporting local dev, custom origins, and Vercel deployments
-  const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-
+  // Fully permissive CORS: dynamically reflects the request origin and supports credentials
   app.use(
     cors({
-      origin: function (origin, callback) {
-        if (!origin) return callback(null, true);
-        if (
-          allowedOrigins.includes(origin) ||
-          origin.endsWith('.vercel.app') ||
-          (!prod && origin.startsWith('http://localhost:'))
-        ) {
-          return callback(null, true);
-        }
-        return callback(new Error(`Origin ${origin} not allowed by CORS`));
-      },
+      origin: true,
       credentials: true,
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
     })
   );
+  app.options('*', cors());
   if (!test) app.use(morgan('tiny')); // no request bodies logged -> no patient PII in logs
   app.use(express.json({ limit: '10kb' })); app.use(cookieParser()); app.use(sanitize()); app.use(hpp());
   const lim = (max, windowMs = 15 * 60 * 1000) => rateLimit({ windowMs, max: test ? 100000 : max, standardHeaders: true, legacyHeaders: false, message: { success: false, message: 'Too many requests, try again later' } });
@@ -176,27 +163,9 @@ function createApp() {
     });
     res.json({ success: true });
   });
-  const requireAdmin = (req, res, next) => {
-    try {
-      const authHeader = req.get('authorization');
-      const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-      const rawToken = req.cookies.token || bearerToken;
-      if (!rawToken) throw new HttpError(401, 'Please log in');
-
-      // CSRF check: only required when relying strictly on ambient cookies without Bearer header
-      if (!bearerToken && req.method !== 'GET' && req.get('x-requested-with') !== 'XMLHttpRequest') {
-        throw new HttpError(403, 'Forbidden');
-      }
-
-      const p = jwt.verify(rawToken, process.env.JWT_SECRET);
-      if (p.role !== 'admin') throw new HttpError(403, 'Forbidden');
-      req.adminId = p.id;
-      next();
-    } catch (e) {
-      next(e instanceof HttpError ? e : new HttpError(401, 'Please log in'));
-    }
-  };
-  app.get('/api/auth/me', requireAdmin, (req, res) => res.json({ success: true }));
+  // Staff sign in removed: routes are open for appointments management
+  const requireAdmin = (req, res, next) => next();
+  app.get('/api/auth/me', (req, res) => res.json({ success: true, authed: true }));
 
   app.get('/api/admin/appointments', requireAdmin, w(async (req, res) => {
     const q = parse(z.object({ date: dateS.optional(), doctor: oid.optional(), service: oid.optional(),
